@@ -6,13 +6,12 @@ uint16_t PinosComPWM[QuantidadePinosPwm] = {3,5,6,9,10,11};
 //quando bate o limite, inverte o sinal
 const int limiteInferior = -100;
 const int limiteSuperior = 500;
-int BrilhoDoPino[QuantidadePinosPwm] = {0,0,0,0,0,0};
+int BrilhoDoPino[QuantidadePinosPwm] = {-50,0,100,200,300,400};
 
 //pra saber se incrementa ou decrementa, aí vai fazendo -1 quando bate no limite inferior e vice versa
 int DirecaoIncremento[QuantidadePinosPwm] = {1, -1, 1, -1, 1, -1};
 
 void loop();
-void sorteiaValoresParaOsPinos();
 
 void setup() {
   Serial.begin(115200);
@@ -23,11 +22,14 @@ void setup() {
       pinMode(PinosComPWM[i], OUTPUT); 
   }
 
+  /*
   randomSeed(analogRead(0));
   sorteiaValoresParaOsPinos();
+  */
 
 }
 
+/*
 void sorteiaValoresParaOsPinos()
 {
   for (int i = 0; i < QuantidadePinosPwm; i++)
@@ -65,8 +67,9 @@ void sorteiaValoresParaOsPinos()
       }
     }
   }
-  
 }
+*/
+
 
 void loop() {
 
@@ -77,15 +80,17 @@ void loop() {
       int brilho = BrilhoDoPino[i];
       if (brilho > 255)
       {
-        brilho = 255;
+          digitalWrite(PinosComPWM[i], HIGH);
       } else
       if (brilho < 0)
       {
-        brilho = 0;
+          digitalWrite(PinosComPWM[i], LOW);
       }
-
-      //seta no PWM
-      analogWrite(PinosComPWM[i], brilho);
+      else
+      {
+          //seta no PWM
+          analogWrite(PinosComPWM[i], brilho);
+      }
 
       //faz o incremento ou decremento
       BrilhoDoPino[i] += DirecaoIncremento[i];
