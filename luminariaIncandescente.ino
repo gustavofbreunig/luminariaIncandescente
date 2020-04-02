@@ -1,6 +1,4 @@
 const uint16_t QuantidadePinosPwm = 6;
-const uint16_t refazerSorteioACada = 100;
-uint16_t refazerSorteio = refazerSorteioACada; //quando bate 0 refaz sorteio dos valores dos pinos
 uint16_t PinosComPWM[QuantidadePinosPwm] = {3,5,6,9,10,11};
 
 //o brilho dos pinos vai de -10000 a 25500 (por exemplo), sendo que 
@@ -42,15 +40,32 @@ void sorteiaValoresParaOsPinos()
       else
       {
         BrilhoDoPino[i] = random(0, limiteSuperior);
-      }
-
-      //TODO: verificar se valores ficaram muito próximos e distanciar se necessário
+      }      
 
       Serial.print("Pino ");
       Serial.print(PinosComPWM[i]);
       Serial.print(" tera valor ");
       Serial.println(BrilhoDoPino[i]);
   }   
+
+  //verifica se algum valor ficou muito proximo de outro e refaz sorteio quantas vezes for necessario
+  for (int i = 0; i < QuantidadePinosPwm; i++)
+  {
+    for (int j = 0; j < QuantidadePinosPwm; j++)
+    {
+      //diferenca absoluta entre o brilho de qualquer pino com qualquer outro
+      if (i != j)
+      {
+        int diferenca = abs(BrilhoDoPino[i] - BrilhoDoPino[j]);
+        if (diferenca < 30)
+        {
+          //chama a função recursivamente
+          sorteiaValoresParaOsPinos();
+        }
+      }
+    }
+  }
+  
 }
 
 void loop() {
@@ -85,12 +100,6 @@ void loop() {
         Serial.print(" bateu no limte ");
         Serial.print(BrilhoDoPino[i]);   
         Serial.println(", a direcao sera invertida.");     
-
-        if (refazerSorteio-- == 1)
-        {
-          sorteiaValoresParaOsPinos();
-          refazerSorteio = refazerSorteioACada;
-        }
         
       }
   }
