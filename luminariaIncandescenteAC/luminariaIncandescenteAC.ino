@@ -1,9 +1,9 @@
 #define PINO_ZERO_CROSS 2
 #define QuantidadePinosTriac 10
-#define FREQUENCIA_REDE 0.1
+#define FREQUENCIA_REDE 0.5
 #define limiteInferior -20
 #define limiteSuperior 180
-#define INCREMENTO_BRILHO 2
+#define INCREMENTO_BRILHO 1
 //multiplicador de tempo para ajuste fino, se ficar em 1000, cada iteracao tem 1ms
 #define MULTIPLICADOR_TEMPO 1000
 
@@ -16,7 +16,7 @@ int BrilhoDoPino[QuantidadePinosTriac] =     { 50,       50,      20,     100,  
 
 
 //pra saber se incrementa ou decrementa, aí vai fazendo -1 quando bate no limite inferior e vice versa
-int DirecaoIncremento[QuantidadePinosTriac] ={ INCREMENTO_BRILHO,-INCREMENTO_BRILHO,INCREMENTO_BRILHO,-INCREMENTO_BRILHO,INCREMENTO_BRILHO,
+int DirecaoIncremento[QuantidadePinosTriac] ={ -INCREMENTO_BRILHO,-INCREMENTO_BRILHO,INCREMENTO_BRILHO,-INCREMENTO_BRILHO,INCREMENTO_BRILHO,
                                                -INCREMENTO_BRILHO,INCREMENTO_BRILHO,-INCREMENTO_BRILHO,INCREMENTO_BRILHO,-INCREMENTO_BRILHO}; 
 
 //tempo entre cada pico de tensao ou tempo que demora cada vez que cruza o zero, em microssegundos, aí divide pelo multiplicador se quiser em millisegundos
@@ -53,7 +53,7 @@ void setup() {
   Serial.println("Sistema rodando.");
 }
 
-uint32_t TempoIteracao = TempoPicoMicroSeg; //-20us para descontar mais ou menos o tempo de execução das instrucoes
+uint32_t TempoIteracao = TempoPicoMicroSeg - 100; //descontar mais ou menos o tempo de execução das instrucoes para o loop nao ficar mais de um semiciclo executando
 
 void loop() {
 
@@ -86,12 +86,12 @@ void loop() {
               }
               else
               {
-                  //pino desligado por padrao
-                  *PinosTriacPORT[iPino] &= ~(1 << PinosTriacPORTN[iPino]);
-                  
                   if (i > tempoDesligado[iPino]) //liga se chegou na hora (o contador de microsegundos passou o tempo desligado
                   {
                       *PinosTriacPORT[iPino] |= (1 << PinosTriacPORTN[iPino]);
+                  } else
+                  {
+                      *PinosTriacPORT[iPino] &= ~(1 << PinosTriacPORTN[iPino]);   
                   }
               }
               
