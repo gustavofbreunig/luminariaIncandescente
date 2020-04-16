@@ -1,45 +1,45 @@
 #define PINO_ZERO_CROSS 2
 #define QuantidadePinosTriac 10
-#define FREQUENCIA_REDE 60L
+#define FREQUENCIA_REDE 0.1
+#define limiteInferior -20
+#define limiteSuperior 180
+#define INCREMENTO_BRILHO 2
+//multiplicador de tempo para ajuste fino, se ficar em 1000, cada iteracao tem 1ms
+#define MULTIPLICADOR_TEMPO 1000
 
-int PinosTriac[QuantidadePinosTriac] = {3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+//mapeamento dos pinos e dados, cada posicao na array se relaciona com o mesmo dado na mesma posicao da outra array
+byte* PinosTriacPORT[QuantidadePinosTriac] = { &PORTD,  &PORTD,  &PORTD, &PORTD, &PORTD, &PORTB, &PORTB, &PORTB, &PORTB, &PORTB }; //registradores 
+byte PinosTriacPORTN[QuantidadePinosTriac] = { PORTD3,  PORTD4,  PORTD5, PORTD6, PORTD7, PORTB0, PORTB1, PORTB2, PORTB3, PORTB4 }; //valores de de cada pino em binario
+byte* PinosTriacDDR[QuantidadePinosTriac] =  { &DDRD,   &DDRD,   &DDRD,  &DDRD,  &DDRD,  &DDRB,  &DDRB,  &DDRB,  &DDRB,  &DDRB  }; //registradores são acessados pelos seus enderecos
+int PinosTriac[QuantidadePinosTriac] =       { 3,       4,       5,      6,      7,      8,      9,      10,     11,     12     }; //pinos de acordo com a notação do arduino, só para documentacao
+int BrilhoDoPino[QuantidadePinosTriac] =     { 50,       50,      20,     100,    70,     120,    90,     140,    100,    170   }; //brilho inicial de cada triac, em percentual
 
-//tempo entre cada pico de tensao ou tempo que demora cada vez que cruza o zero, expresso em microssegundos inteiros
-const uint32_t TempoPicoMicroSeg = (1.0 / (FREQUENCIA_REDE * 2.0)) * 1000.0 * 1000.0;
-
-#define limiteInferior -1600
-#define limiteSuperior 10000
-int BrilhoDoPino[QuantidadePinosTriac] = {-1000, -500, 0, 1000, 2000, 3000, 4000, 5000, 6000, 7000}; //brilho inicial de cada triac
 
 //pra saber se incrementa ou decrementa, aí vai fazendo -1 quando bate no limite inferior e vice versa
-int DirecaoIncremento[QuantidadePinosTriac] = {1, -1, 1, -1, 1, -1, 1, -1, 1, -1};
+int DirecaoIncremento[QuantidadePinosTriac] ={ INCREMENTO_BRILHO,-INCREMENTO_BRILHO,INCREMENTO_BRILHO,-INCREMENTO_BRILHO,INCREMENTO_BRILHO,
+                                               -INCREMENTO_BRILHO,INCREMENTO_BRILHO,-INCREMENTO_BRILHO,INCREMENTO_BRILHO,-INCREMENTO_BRILHO}; 
 
-volatile uint32_t counter_crossed_zero = 0;
+//tempo entre cada pico de tensao ou tempo que demora cada vez que cruza o zero, em microssegundos, aí divide pelo multiplicador se quiser em millisegundos
+const uint32_t TempoPicoMicroSeg = ((1.0 / (FREQUENCIA_REDE * 2.0)) * 1000.0 * 1000.0) / MULTIPLICADOR_TEMPO;
 volatile bool ajustar_brilho = false;
 
 ISR(INT0_vect)
 {
-  //interrupção que ocorre a cada 8,3ms, para uma alteração de brilho sem 
-  //piscadas, deve ocorrer o ajuste a cada ~30ms, ou seja, 4 interrupções
-
-  counter_crossed_zero++;
-  if (counter_crossed_zero > 4)
-  {
-      ajustar_brilho = true;
-      counter_crossed_zero = 0;
-  }
+  //a cada cruzada no zero, dispara atualização do brilho
+  ajustar_brilho = true;
 }
 
 void setup() {   
   Serial.begin(9600);
   Serial.print("Frequencia da rede: ");
   Serial.println(FREQUENCIA_REDE);
-  Serial.print("Tempo entre picos AC (microsegundos): ");
+  Serial.print("Tempo entre picos AC: ");
   Serial.println(TempoPicoMicroSeg);
-
+  
+  //coloca os pinos como saida
   for (int pin = 0; pin < QuantidadePinosTriac; pin++)
   {
-      pinMode(PinosTriac[pin], OUTPUT);
+      *PinosTriacDDR[pin] |= (1 << PinosTriacPORTN[pin]);
   }
 
   //seta a INT0 para disparar quando a tensão cai pra zero (falling edge)
@@ -50,35 +50,82 @@ void setup() {
   EIMSK |= (1 << INT0);
   sei();
 
-  Serial.print("Sistema rodando.");
+  Serial.println("Sistema rodando.");
 }
+
+uint32_t TempoIteracao = TempoPicoMicroSeg; //-20us para descontar mais ou menos o tempo de execução das instrucoes
 
 void loop() {
 
   if (ajustar_brilho)
-  {
-      for (int i = 0; i < TempoPicoMicroSeg; i++)
-      {
-          //controle de intensidade do brilho baseado no momento que deve ligar o TRIAC
-          //exemplos:
-          //se a intensidade está entre 1 e 7000, o delay será de 8300 - 7000 = 1300, se for 300, será de 8000
-          //se a intensidade está >= 8300, bota o pino pra HIGH direto
-          //se a intensidade está <= 0, bota o pino low 
-        
-          for (int iPino = 0; iPino < QuantidadePinosTriac; iPino++)
+  {    
+      uint32_t tempoDesligado[QuantidadePinosTriac] = {0,0,0,0,0,0,0,0,0,0};
+
+      //calcula o tempo que deve ficar desligado durante o ciclo
+      for (int iPino = 0; iPino < QuantidadePinosTriac; iPino++)
+      {    
+          if (BrilhoDoPino[iPino] >= 0 && BrilhoDoPino[iPino] <= 100)
           {
-              digitalWrite(PinosTriac[iPino], HIGH); 
+              long double pctDoTempoDesligado = (100.0 - BrilhoDoPino[iPino]) / 100; //inverso do tempo ligado pra ter o tempo que deve ficar desligado
+              tempoDesligado[iPino] = TempoIteracao * pctDoTempoDesligado;
+          }
+      }
+    
+      for (uint32_t i = 0; i < TempoIteracao; i++) 
+      {       
+          for (int iPino = 0; iPino < QuantidadePinosTriac; iPino++)
+          {                       
+              //abaixo de 0 ou acima de 100, é low ou high definitivo, respectivamente
+              if (BrilhoDoPino[iPino] <= 0)
+              {
+                *PinosTriacPORT[iPino] &= ~(1 << PinosTriacPORTN[iPino]);
+              }
+              else if (BrilhoDoPino[iPino] >= 100)
+              {
+                *PinosTriacPORT[iPino] |= (1 << PinosTriacPORTN[iPino]);
+              }
+              else
+              {
+                  //pino desligado por padrao
+                  *PinosTriacPORT[iPino] &= ~(1 << PinosTriacPORTN[iPino]);
+                  
+                  if (i > tempoDesligado[iPino]) //liga se chegou na hora (o contador de microsegundos passou o tempo desligado
+                  {
+                      *PinosTriacPORT[iPino] |= (1 << PinosTriacPORTN[iPino]);
+                  }
+              }
+              
           }
 
-        
+        _delay_us(MULTIPLICADOR_TEMPO);
       }
 
-      //fim do ciclo, bota tudo pra LOW
       for (int iPino = 0; iPino < QuantidadePinosTriac; iPino++)
       {
-        digitalWrite(PinosTriac[iPino], LOW);       
+          //inverte a direcao do incremento (multiplica por -1)
+          if (BrilhoDoPino[iPino] >= limiteSuperior || BrilhoDoPino[iPino] <= limiteInferior)
+          {
+              DirecaoIncremento[iPino] *= -1;
+              Serial.print("Pino ");
+              Serial.print(PinosTriac[iPino]);
+              Serial.print(" bateu no limite ");
+              Serial.print(BrilhoDoPino[iPino]);
+              Serial.println(", invertendo ordem de incremento/decremento");
+          }
+
+          //altera intensidade do brilho
+          BrilhoDoPino[iPino] += DirecaoIncremento[iPino];
+      }      
+
+/*
+      Serial.print("Tempo desligado: [");
+      for (int iPino = 0; iPino < QuantidadePinosTriac; iPino++)
+      {                         
+          Serial.print(tempoDesligado[iPino]);
+          Serial.print(" , ");
       }
-      
+      Serial.println("]");
+*/
       ajustar_brilho = false;
   }
 
