@@ -1,6 +1,6 @@
 #define PINO_ZERO_CROSS 2
 #define QuantidadePinosTriac 10
-#define FREQUENCIA_REDE 0.5
+#define FREQUENCIA_REDE 1
 #define limiteInferior -20
 #define limiteSuperior 180
 #define INCREMENTO_BRILHO 1
@@ -18,25 +18,26 @@
 byte* PinosTriacPORT[QuantidadePinosTriac] = { &PORTD,  &PORTD,  &PORTD, &PORTD, &PORTD, &PORTB, &PORTB, &PORTB, &PORTB, &PORTB }; //registradores
 byte PinosTriacPORTN[QuantidadePinosTriac] = { PORTD3,  PORTD4,  PORTD5, PORTD6, PORTD7, PORTB0, PORTB1, PORTB2, PORTB3, PORTB4 }; //valores de de cada pino em binario
 byte* PinosTriacDDR[QuantidadePinosTriac] =  { &DDRD,   &DDRD,   &DDRD,  &DDRD,  &DDRD,  &DDRB,  &DDRB,  &DDRB,  &DDRB,  &DDRB  }; //registradores são acessados pelos seus enderecos
-int PinosTriac[QuantidadePinosTriac] =       { 3,       4,       5,      6,      7,      8,      9,      10,     11,     12     }; //pinos de acordo com a notação do arduino, só para documentacao
-int BrilhoDoPino[QuantidadePinosTriac] =     { 50,      50,      20,     100,    70,     120,    90,     140,    100,    170    }; //brilho inicial de cada triac, em percentual
+uint8_t PinosTriac[QuantidadePinosTriac] =   { 3,       4,       5,      6,      7,      8,      9,      10,     11,     12     }; //pinos de acordo com a notação do arduino, só para documentacao
+int16_t BrilhoDoPino[QuantidadePinosTriac] = { 70,      50,      20,     100,    70,     120,    90,     140,    100,    170    }; //brilho inicial de cada triac, em percentual
 
 
-//pra saber se incrementa ou decrementa, aí vai fazendo -1 quando bate no limite inferior e vice versa
-int DirecaoIncremento[QuantidadePinosTriac] = { -INCREMENTO_BRILHO, -INCREMENTO_BRILHO, INCREMENTO_BRILHO, -INCREMENTO_BRILHO, INCREMENTO_BRILHO,
-                                                -INCREMENTO_BRILHO, INCREMENTO_BRILHO, -INCREMENTO_BRILHO, INCREMENTO_BRILHO, -INCREMENTO_BRILHO
-                                              };
+//pra saber se incrementa ou decrementa, aí vai fazendo *-1 quando bate no limite inferior e vice versa
+double DirecaoIncremento[QuantidadePinosTriac] = {INCREMENTO_BRILHO, -INCREMENTO_BRILHO, INCREMENTO_BRILHO, -INCREMENTO_BRILHO, INCREMENTO_BRILHO,
+                                                  -INCREMENTO_BRILHO, INCREMENTO_BRILHO, -INCREMENTO_BRILHO, INCREMENTO_BRILHO, -INCREMENTO_BRILHO};
 
 volatile bool ajustar_brilho = false;
 volatile bool recalcular_tempos = false;
-volatile int recalcular_cont = 0;
+volatile uint8_t recalcular_cont = 0;
 
 ISR(INT0_vect)
 {
   //a cada cruzada no zero, dispara os triacs a cada semiciclo
   ajustar_brilho = true;
 
-  if (++recalcular_cont % 4 == 0) //iteração que recalcula os tempos, só precisa ocorrer a cada 4 semiciclos
+  //iteração que recalcula os tempos, só precisa ocorrer a cada 4 semiciclos
+  recalcular_cont++;
+  if (recalcular_cont % 4 == 0)
   {
     recalcular_tempos = true;
     recalcular_cont = 0;
@@ -56,7 +57,7 @@ void setup() {
   Serial.println("us");
 
   //coloca os pinos como saida
-  for (int pin = 0; pin < QuantidadePinosTriac; pin++)
+  for (uint8_t pin = 0; pin < QuantidadePinosTriac; pin++)
   {
     *PinosTriacDDR[pin] |= (1 << PinosTriacPORTN[pin]);
   }
@@ -72,14 +73,26 @@ void setup() {
   Serial.println("Sistema rodando.");
 }
 
+//tempo que deve ficar desligado durante o ciclo, somente para aqueles que estão meio ligados
 uint32_t tempoDesligado[QuantidadePinosTriac] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+//contador de pinos já setados, quando esse contador chega a mesma quantidade de pinos,
+//quer dizer que acabou e pode rearmar a interrupção e sair dos loops
+uint16_t cont_pinos_setados = 0;
+
+//array de valores que verifica se precisa iterar sobre o pino ou não
+//assim economiza instruções
+bool pinoJaSetado[QuantidadePinosTriac] = {false, false, false, false, false, false, false, false, false, false};
+
+//utilizado para iteracao
+uint8_t iPino = 0;
+uint32_t i = 0;
 
 void loop() {
 
   if (recalcular_tempos)
   {
-
-    for (uint16_t iPino = 0; iPino < QuantidadePinosTriac; iPino++)
+    for (iPino = 0; iPino < QuantidadePinosTriac; iPino++)
     {
       tempoDesligado[iPino] = 0; //limpa memoria
 
@@ -105,43 +118,70 @@ void loop() {
       BrilhoDoPino[iPino] += DirecaoIncremento[iPino];
     }
 
-    Serial.println("cu");
     recalcular_tempos = false;
   }
 
   if (ajustar_brilho)
   {
-    for (uint32_t i = 0; i < TEMPO_SEMICICLO_US - DESCONTO_TEMPO; i += AVANCO_ITERACAO)
+
+    //limpa memoria
+    cont_pinos_setados = 0;
+    for (iPino = 0; iPino < QuantidadePinosTriac; iPino++)
     {
-      for (uint16_t iPino = 0; iPino < QuantidadePinosTriac; iPino++)
+      pinoJaSetado[iPino] = false;
+    }
+
+    for (i = 0; i < TEMPO_SEMICICLO_US - DESCONTO_TEMPO; i += AVANCO_ITERACAO)
+    {
+      for (iPino = 0; iPino < QuantidadePinosTriac; iPino++)
       {
+        if (pinoJaSetado[iPino] == true)
+        {
+          continue;
+        }
+
         //abaixo de 0 ou acima de 100, é low ou high definitivo, respectivamente
         if (BrilhoDoPino[iPino] <= 0)
         {
           *PinosTriacPORT[iPino] &= ~(1 << PinosTriacPORTN[iPino]);
+          pinoJaSetado[iPino] = true;
+          cont_pinos_setados++;
         }
         else if (BrilhoDoPino[iPino] >= 100)
         {
           *PinosTriacPORT[iPino] |= (1 << PinosTriacPORTN[iPino]);
+          pinoJaSetado[iPino] = true;
+          cont_pinos_setados++;
         }
-        else
+        else if (i < tempoDesligado[iPino])
         {
-          //deixa ligado por um intervalor equivalente a algumas iteracoes, o suficiente para disparar o TRIAC
-          if (i >= tempoDesligado[iPino] && i <= (tempoDesligado[iPino] + (AVANCO_ITERACAO * 2)) )
-          {
-            *PinosTriacPORT[iPino] |= (1 << PinosTriacPORTN[iPino]);
-          }
-          else
-          {
-            *PinosTriacPORT[iPino] &= ~(1 << PinosTriacPORTN[iPino]);
-          }
+          //não chegou a hora de ligar ainda
+          *PinosTriacPORT[iPino] &= ~(1 << PinosTriacPORTN[iPino]);
         }
+        else if (i >= tempoDesligado[iPino] && i <= (tempoDesligado[iPino] + (AVANCO_ITERACAO * 2)))
+        {
+          //periodo ligado
+          *PinosTriacPORT[iPino] |= (1 << PinosTriacPORTN[iPino]);
+        }
+        else if (i > (tempoDesligado[iPino] + (AVANCO_ITERACAO * 2)))
+        {
+          //passou do tempo ligado, desliga de novo
+          *PinosTriacPORT[iPino] &= ~(1 << PinosTriacPORTN[iPino]);
+          pinoJaSetado[iPino] = true;
+          cont_pinos_setados++;
+        }
+
+      }
+      
+      if (cont_pinos_setados == QuantidadePinosTriac)
+      {
+        //todos pinos já foram setados se precisava, pode sair do loop
+        ajustar_brilho = false;
+        break;
       }
 
       _delay_us(AVANCO_ITERACAO);
     }
-
-    ajustar_brilho = false;
   }
 
 }
